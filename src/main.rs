@@ -1,13 +1,17 @@
-use iced::widget::{button, column, pick_list, row, text, text_input};
+use iced::widget::{button, Space, column, pick_list, row, text, text_input};
+use iced::widget::theme;
 use iced::{Bottom, Center, Color, Element, Fill, Right, Task as Command, Theme};
 use iced_layershell::reexport::Anchor;
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use iced_layershell::{Application, to_layer_message};
 
+use iced::alignment::Horizontal;
+use iced::widget::Text;
+
 pub fn main() -> Result<(), iced_layershell::Error> {
     InputRegionExample::run(Settings {
         layer_settings: LayerShellSettings {
-            size: Some((800, 300)),
+            size: Some((600, 250)),
             anchor: Anchor::Bottom | Anchor::Left | Anchor::Right | Anchor::Top,
             ..Default::default()
         },
@@ -15,8 +19,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     })
 }
 
-#[derive(Copy, Clone)]
-struct InputRegionExample;
+#[derive(Clone)]
+struct InputRegionExample {
+    theme: theme::Theme,
+}
 
 #[to_layer_message]
 #[derive(Debug, Clone)]
@@ -31,11 +37,16 @@ enum Message {
 impl Application for InputRegionExample {
     type Message = Message;
     type Flags = ();
-    type Theme = Theme;
+    type Theme = theme::Theme;
     type Executor = iced::executor::Default;
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        (Self, Command::none())
+        let s :InputRegionExample= InputRegionExample{ theme: Theme::TokyoNight };
+        (s, Command::none())
+    }
+
+    fn theme(&self) -> Self::Theme {
+        self.theme.clone()
     }
 
     fn namespace(&self) -> String {
@@ -65,40 +76,49 @@ impl Application for InputRegionExample {
                 text("Authentication Required to set locale")
                     .size(25)
                     .width(Fill),
-                row![
-                    text("Authenticating as:").size(16),
-                    user_picker.text_size(16)
+                column![
+                    row![
+                        text("Authenticating as:").size(16),
+                        user_picker.text_size(16)
+                    ]
+                    .spacing(5)
+                    .align_y(Center),
+                    password_input,
                 ]
-                .spacing(5)
-                .align_y(Center),
-                password_input,
+                .spacing(10)
+                .padding(0),
             ]
-            .spacing(20),
-            column![
-                row![
-                    button("Cancel").on_press(Message::Cancel).padding(10),
-                    button("Authenticate")
-                        .on_press(Message::Authenticate)
-                        .padding(10),
-                ]
-                .spacing(20)
-                .height(Fill)
-                .align_y(Bottom),
-            ]
-            .width(Fill)
-            .align_x(Right)
-        ]
-        .spacing(15)
-        .padding(40)
-        .max_width(800)
-        .into()
-    }
+            .spacing(20)
+            .padding(30),
 
-    fn style(&self, theme: &Self::Theme) -> iced_layershell::Appearance {
-        use iced_layershell::Appearance;
-        Appearance {
-            background_color: Color::from_rgba(0.00, 0.00, 0.00, 1.00),
-            text_color:Color::from_rgba(0.80, 0.80, 0.80, 1.00),
-        }
+            Space::with_height(Fill),
+
+            row![
+                button(
+                    column![
+                        text("Cancel")
+                    ]   .width(Fill)
+                        .align_x(Center)
+                ).on_press(Message::Cancel)
+                .padding(10),
+                    // button("Cancel").on_press(Message::Cancel).padding(10),
+                    
+                button(
+                    column![
+                        text("Authenticate")
+                    ]   .width(Fill)
+                        .align_x(Center)
+                ).on_press(Message::Authenticate)
+                .padding(10)
+                // button("Authenticate")
+                //     .on_press(Message::Authenticate)
+                //     .padding(10).width(Fill),
+            ]
+            .spacing(2)
+            // .padding(5)
+            .width(Fill)
+            .align_y(Bottom),
+        ].height(Fill)
+        .into()
     }
 }
