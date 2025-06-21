@@ -1,4 +1,5 @@
 use polkit_agent_rs::Listener;
+use std::sync::{Arc, Mutex};
 mod imp;
 use crate::Message;
 use futures::channel::mpsc::Sender;
@@ -10,20 +11,33 @@ glib::wrapper! {
 }
 
 impl super::MyPolkit {
-    pub fn new(sender: Sender<Message>) -> Self {
+    pub fn new(sender: Arc<Mutex<Sender<Message>>>) -> Self {
         let obj: Self = glib::Object::new::<MyPolkit>();
 
         // Set the sender field inside the impl
         let imp = imp::MyPolkit::from_obj(&obj);
-        println!("relaced {:?}", imp.sender);
-        imp.sender.replace(Some(sender));
-        println!("relaced {:?}", imp.sender);
+        // // Properly set the sender using RefCell's borrow_mut
+        // if let Some(sener) = imp.sender {
+        //     *sener.borrow_mut() = Some(sender);
+        // }
+        //
+        // if let Ok(mut sender) = sender.lock() {
+        //     println!("GOTCA");
+        //     let _ = sender.try_send(Message::NewWindow);
+        // } else {
+        //     println!("NOPE");
+        //     eprintln!("No sender available");
+        // }
+
+        let sender_clone = sender.lock().unwrap().clone(); // clone the inner Sender
+        *imp.sender.lock().unwrap() = Some(sender_clone);
+        println!("{:?}", obj);
         obj
     }
 }
 
-// impl Default for MyPolkit {
-//     fn default() -> Self {
-//         glib::Object::new()
-//     }
-// }
+impl Default for MyPolkit {
+    fn default() -> Self {
+        glib::Object::new()
+    }
+}

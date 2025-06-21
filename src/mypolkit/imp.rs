@@ -13,6 +13,7 @@ use polkit_agent_rs::polkit::UnixUser;
 use polkit_agent_rs::subclass::ListenerImpl;
 use rpassword::prompt_password;
 use std::cell::RefCell;
+use std::sync::Mutex;
 
 fn choose_user(users: &[UnixUser]) -> Option<(String, usize)> {
     let names: Vec<String> = users
@@ -30,8 +31,9 @@ fn choose_user(users: &[UnixUser]) -> Option<(String, usize)> {
 }
 
 pub struct MyPolkit {
-    pub sender: RefCell<Option<Sender<Message>>>,
-}
+    pub sender: Arc<Mutex<Option<Sender<Message>>>>,
+    // Add other polkit-related fields you need
+} // MyPolkit implementation needs these adjustments:
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
@@ -144,13 +146,27 @@ impl ListenerImpl for MyPolkit {
         cancellable: gio::Cancellable,
         task: gio::Task<Self::Message>,
     ) {
-        if let Some(sender) = self.sender.borrow().as_ref() {
+        // if let Ok(sender) = self.sender.lock() {
+        //     println!("GOTCA");
+        //     let _ = sender.borrow_mut().try_send(Message::NewWindow);
+        // } else {
+        //     println!("NOPE");
+        //     eprintln!("No sender available");
+        // }
+        println!("GOTCA");
+        if let Ok(mut guard) = self.sender.lock() {
             println!("GOTCA");
-            let _ = sender.clone().try_send(Message::NewWindow);
+            if let Some(sender) = guard.as_mut() {
+                println!("GOTCA");
+                let _ = sender.try_send(Message::NewWindow);
+            } else {
+                println!("NO SENDER INSIDE");
+            }
         } else {
             println!("NOPE");
             eprintln!("No sender available");
         }
+        println!("NOPE");
         // self.sender.try_send(Message::NewWindow);
         // Message::Init_auth();
         // Create a new window as well as a AgentSession
@@ -187,14 +203,7 @@ impl Default for MyPolkit {
     fn default() -> Self {
         println!("FUCKED ME");
         Self {
-            sender: RefCell::new(None),
-        }
-    }
-}
-impl MyPolkit {
-    fn new(sender: Sender<Message>) -> Self {
-        Self {
-            sender: RefCell::new(Some(sender)),
+            sender: Arc::new(Mutex::new(None)),
         }
     }
 }

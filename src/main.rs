@@ -10,16 +10,15 @@ use iced_layershell::to_layer_message;
 
 use iced::widget::{Space, button, column, pick_list, row, text, text_input};
 use iced::{Bottom, Center, Fill, Theme};
-
 use polkit_agent_rs::traits::ListenerExt;
+use std::sync::Arc;
+use std::sync::Mutex;
 mod mypolkit;
 use mypolkit::MyPolkit;
 
 use polkit_agent_rs::Session as AgentSession;
-use zbus::{connection, interface};
 
-use futures::channel::{mpsc, mpsc::Sender};
-use futures::future::pending;
+use futures::channel::mpsc;
 
 pub fn main() -> Result<(), iced_layershell::Error> {
     daemon(
@@ -31,8 +30,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .subscription(Counter::subscription)
     .settings(MainSettings {
         layer_settings: LayerShellSettings {
-            // start_mode: StartMode::Background,
-            size: Some((0, 400)),
+            start_mode: StartMode::Background,
+            size: Some((800, 250)),
             exclusive_zone: 400,
             anchor: Anchor::Bottom | Anchor::Left | Anchor::Right,
             ..Default::default()
@@ -82,79 +81,38 @@ impl Counter {
         String::from("Counter - Iced")
     }
 
-    // fn subscription(&self) -> iced::Subscription<Message> {
-    //     iced::Subscription::batch(vec![
-    //         iced::Subscription::run(|| {
-    //             iced::stream::channel(100, |mut sender| async move {
-    //                 let main_loop = glib::MainLoop::new(None, true);
-
-    //                 sender.try_send(Message::NewWindow);
-    //                 let my_polkit = MyPolkit::new(sender);
-
-    //                 let Ok(subject) = UnixSession::new_for_process_sync(
-    //                     nix::unistd::getpid().as_raw(),
-    //                     gio::Cancellable::NONE,
-    //                 ) else {
-    //                     unreachable!();
-    //                 };
-
-    //                 let Ok(_handle) = my_polkit.register(
-    //                     RegisterFlags::NONE,
-    //                     &subject,
-    //                     OBJECT_PATH,
-    //                     gio::Cancellable::NONE,
-    //                 ) else {
-    //                     unreachable!();
-    //                 };
-    //                 // iced::subscription()
-    //                 main_loop.run();
-    //                 unreachable!();
-    //             })
-    //         }),
-    //         iced::window::close_events().map(Message::WindowClosed),
-    //         event::listen().map(Message::IcedEvent),
-    //     ])
-    // }
-
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::Subscription::batch(vec![
             iced::Subscription::run(|| {
-                // This closure must return a Stream of Messages
-                iced::stream::channel(100, |mut sender| {
-                    // We *do not* make this async because we block inside
-                    // Instead spawn a thread here that runs the glib main loop
+                iced::stream::channel(100, |sender| {
+                    let sender = Arc::new(Mutex::new(sender));
 
-                    // Spawn a thread so main_loop.run() does NOT block the async executor
                     std::thread::spawn(move || {
+                        println!("STARTED THREAD");
                         let main_loop = glib::MainLoop::new(None, true);
+
+                        // let (sender, mut receiver) = mpsc::channel::<Message>(10);
                         let my_polkit = MyPolkit::new(sender);
 
-                        let subject = match UnixSession::new_for_process_sync(
+                        let Ok(subject) = UnixSession::new_for_process_sync(
                             nix::unistd::getpid().as_raw(),
                             gio::Cancellable::NONE,
-                        ) {
-                            Ok(s) => s,
-                            Err(_) => {
-                                // Handle error, maybe send a message or log
-                                return;
-                            }
+                        ) else {
+                            unreachable!();
                         };
-
-                        if let Err(_) = my_polkit.register(
+                        let Ok(_handle) = my_polkit.register(
                             RegisterFlags::NONE,
                             &subject,
                             OBJECT_PATH,
                             gio::Cancellable::NONE,
-                        ) {
-                            // Handle error or log
-                            return;
-                        }
+                        ) else {
+                            unreachable!();
+                        };
+                        println!("STARTED mainlopo");
 
-                        // Run main loop (blocks thread, but this thread is separate)
                         main_loop.run();
                     });
 
-                    // Return immediately; stream will receive messages asynchronously from the thread
                     futures::future::ready(())
                 })
             }),
@@ -178,20 +136,25 @@ impl Counter {
                 }
                 Command::none()
             }
+
             Message::NewWindow => {
-                let id = iced::window::Id::unique();
+                // if self.window_shown {
+                //     return Command::none();
+                // }
+
+                // self.window_shown = true;
                 Command::done(Message::NewLayerShell {
                     settings: NewLayerShellSettings {
-                        size: Some((100, 100)),
+                        size: None,
                         exclusive_zone: None,
-                        anchor: Anchor::Left | Anchor::Bottom,
+                        anchor: Anchor::Right | Anchor::Top | Anchor::Left | Anchor::Bottom,
                         layer: Layer::Top,
-                        margin: None,
-                        keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                        margin: Some((100, 100, 100, 100)),
+                        keyboard_interactivity: KeyboardInteractivity::OnDemand,
                         use_last_output: false,
                         ..Default::default()
                     },
-                    id,
+                    id: iced::window::Id::unique(),
                 })
             }
             Message::Close(id) => task::effect(Action::Window(WindowAction::Close(id))),
@@ -257,11 +220,11 @@ use polkit_agent_rs::polkit::UnixSession;
 
 const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
 
-pub fn _pain() -> Result<(), iced_layershell::Error> {
+pub fn pain() -> Result<(), iced_layershell::Error> {
     let main_loop = glib::MainLoop::new(None, true);
 
     let (sender, mut receiver) = mpsc::channel::<Message>(10);
-    let my_polkit = MyPolkit::new(sender);
+    let my_polkit = MyPolkit::new(Arc::new(Mutex::new(sender)));
 
     let Ok(subject) =
         UnixSession::new_for_process_sync(nix::unistd::getpid().as_raw(), gio::Cancellable::NONE)
