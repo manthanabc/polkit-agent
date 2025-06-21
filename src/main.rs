@@ -145,12 +145,9 @@ impl Counter {
                 // self.window_shown = true;
                 Command::done(Message::NewLayerShell {
                     settings: NewLayerShellSettings {
-                        size: None,
-                        exclusive_zone: None,
+                        size: Some((600, 250)),
                         anchor: Anchor::Right | Anchor::Top | Anchor::Left | Anchor::Bottom,
                         layer: Layer::Top,
-                        margin: Some((100, 100, 100, 100)),
-                        keyboard_interactivity: KeyboardInteractivity::OnDemand,
                         use_last_output: false,
                         ..Default::default()
                     },
