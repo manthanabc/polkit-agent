@@ -1,6 +1,6 @@
 use polkit_agent_rs::Listener;
 use std::sync::{Arc, Mutex};
-mod imp;
+pub mod imp;
 use crate::Message;
 use futures::channel::mpsc::Sender;
 

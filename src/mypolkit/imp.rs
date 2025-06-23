@@ -133,6 +133,24 @@ fn start_session(
     sub_loop.run();
 }
 
+#[derive(Debug, Clone)]
+pub struct Session {
+    identifier: Vec<polkit::Identity>,
+    cancellable: gio::Cancellable,
+    cookie: String,
+    session: Option<AgentSession>,
+}
+
+impl Session {
+    fn new(id: Vec<polkit::Identity>, cal: gio::Cancellable, cookie: String) -> Self {
+        Self {
+            identifier: id,
+            cancellable: cal,
+            cookie,
+            session: None,
+        }
+    }
+}
 impl ListenerImpl for MyPolkit {
     type Message = String;
     fn initiate_authentication(
@@ -153,36 +171,28 @@ impl ListenerImpl for MyPolkit {
         //     println!("NOPE");
         //     eprintln!("No sender available");
         // }
+        let users: Vec<UnixUser> = identities
+            .into_iter()
+            .flat_map(|idenifier| idenifier.dynamic_cast())
+            .collect();
+        // let sess = Session::new(identities, cancellable, cookie.to_string());
         println!("GOTCA");
         if let Ok(mut guard) = self.sender.lock() {
-            println!("GOTCA");
             if let Some(sender) = guard.as_mut() {
-                println!("GOTCA");
-                let _ = sender.try_send(Message::NewWindow);
+                let _ = sender.try_send(Message::NewSession(
+                    cookie.to_string(),
+                    users
+                        .iter()
+                        .map(|user| user.name().unwrap().to_string())
+                        .collect(),
+                ));
             } else {
-                println!("NO SENDER INSIDE");
+                println!("NO SENDER INSIDE??");
             }
         } else {
             println!("NOPE");
             eprintln!("No sender available");
         }
-        println!("NOPE");
-        // self.sender.try_send(Message::NewWindow);
-        // Message::Init_auth();
-        // Create a new window as well as a AgentSession
-        // on passowrd recieve close the window and session
-        let users: Vec<UnixUser> = identities
-            .into_iter()
-            .flat_map(|idenifier| idenifier.dynamic_cast())
-            .collect();
-        let Some((name, index)) = choose_user(&users) else {
-            cancellable.cancel();
-            return;
-        };
-        let session = AgentSession::new(&users[index], cookie);
-
-        let count = Arc::new(AtomicU8::new(0));
-        start_session(&session, name, cancellable, task, cookie.to_string(), count);
     }
 
     fn initiate_authentication_finish(

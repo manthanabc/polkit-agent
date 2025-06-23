@@ -7,6 +7,8 @@ use iced_layershell::build_pattern::{MainSettings, daemon};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings};
 use iced_layershell::settings::{LayerShellSettings, StartMode};
 use iced_layershell::to_layer_message;
+use polkit_agent_rs::polkit;
+use polkit_agent_rs::polkit::UnixUser;
 
 use iced::widget::{Space, button, column, pick_list, row, text, text_input};
 use iced::{Bottom, Center, Fill, Theme};
@@ -45,9 +47,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 struct Counter {
     value: i32,
     text: String,
-    session: Option<AgentSession>,
 }
 
+use mypolkit::imp::Session;
+use std::cell::RefCell;
 #[to_layer_message(multi)]
 #[derive(Debug, Clone)]
 enum Message {
@@ -57,6 +60,7 @@ enum Message {
     Authenticate,
     Cancel,
     NewWindow,
+    NewSession(String, Vec<String>),
     Close(Id),
     IcedEvent(Event),
 }
@@ -71,7 +75,6 @@ impl Counter {
             Self {
                 value: 0,
                 text: text.to_string(),
-                session: None,
             },
             Command::none(),
         )
@@ -137,12 +140,42 @@ impl Counter {
                 Command::none()
             }
 
-            Message::NewWindow => {
+            Message::NewSession(cookie, user) => {
                 // if self.window_shown {
                 //     return Command::none();
                 // }
 
                 // self.window_shown = true;
+                //
+                //
+                //
+
+                // let users: Vec<UnixUser> = identities
+                //     .into_iter()
+                //     .flat_map(|idenifier| idenifier.dynamic_cast())
+                //     .collect();
+                // let Some((name, index)) = choose_user(&users) else {
+                //     cancellable.cancel();
+                //     return;
+                // };
+                // let session = AgentSession::new(&users[index], cookie);
+
+                // let count = Arc::new(AtomicU8::new(0));
+                // start_session(&session, name, cancellable, task, cookie.to_string(), count);
+
+                // let users: Vec<UnixUser> = identities
+                //     .into_iter()
+                //     .flat_map(|idenifier| idenifier.dynamic_cast())
+                //     .collect();
+                // let Some((name, index)) = choose_user(&users) else {
+                //     cancellable.cancel();
+                //     return;
+                // };
+                let user: UnixUser = UnixUser::new_for_name(&user[0]).unwrap();
+                let session = AgentSession::new(&user, &cookie);
+
+                // let count = Arc::new(AtomicU8::new(0));
+                // start_session(&session, name, cancellable, task, cookie.to_string(), count);
                 Command::done(Message::NewLayerShell {
                     settings: NewLayerShellSettings {
                         size: Some((600, 250)),
