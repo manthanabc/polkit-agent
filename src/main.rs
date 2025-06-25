@@ -9,6 +9,7 @@ use iced_layershell::settings::{LayerShellSettings, StartMode};
 use iced_layershell::to_layer_message;
 use polkit_agent_rs::polkit;
 use polkit_agent_rs::polkit::UnixUser;
+use std::collections::BTreeMap;
 
 use iced::widget::{Space, button, column, pick_list, row, text, text_input};
 use iced::{Bottom, Center, Fill, Theme};
@@ -33,7 +34,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .settings(MainSettings {
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
-            size: Some((800, 250)),
+            size: Some((600, 250)),
             exclusive_zone: 400,
             anchor: Anchor::Bottom | Anchor::Left | Anchor::Right,
             ..Default::default()
@@ -43,21 +44,28 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .run_with(|| Counter::new("Hello"))
 }
 
+struct AuthSession {
+    user: Vec<String>,
+    pass: String,
+    sess: AgentSession,
+}
+
 #[derive(Debug, Default)]
 struct Counter {
     value: i32,
     text: String,
+    session: BTreeMap<iced::window::Id, AgentSession>,
 }
 
-use mypolkit::imp::Session;
+// use mypolkit::imp::Session;
 use std::cell::RefCell;
 #[to_layer_message(multi)]
 #[derive(Debug, Clone)]
 enum Message {
     WindowClosed(iced::window::Id),
     UserSelected(String),
-    PasswordChanged(String),
-    Authenticate,
+    PasswordSubmit(String),
+    Authenticate(iced::window::Id),
     Cancel,
     NewWindow,
     NewSession(String, Vec<String>),
@@ -75,6 +83,7 @@ impl Counter {
             Self {
                 value: 0,
                 text: text.to_string(),
+                session: BTreeMap::new(),
             },
             Command::none(),
         )
@@ -91,7 +100,6 @@ impl Counter {
                     let sender = Arc::new(Mutex::new(sender));
 
                     std::thread::spawn(move || {
-                        println!("STARTED THREAD");
                         let main_loop = glib::MainLoop::new(None, true);
 
                         // let (sender, mut receiver) = mpsc::channel::<Message>(10);
@@ -111,7 +119,6 @@ impl Counter {
                         ) else {
                             unreachable!();
                         };
-                        println!("STARTED mainlopo");
 
                         main_loop.run();
                     });
@@ -175,6 +182,8 @@ impl Counter {
                 let session = AgentSession::new(&user, &cookie);
 
                 // let count = Arc::new(AtomicU8::new(0));
+                let id = iced::window::Id::unique();
+                self.session.insert(id, session);
                 // start_session(&session, name, cancellable, task, cookie.to_string(), count);
                 Command::done(Message::NewLayerShell {
                     settings: NewLayerShellSettings {
@@ -184,7 +193,7 @@ impl Counter {
                         use_last_output: false,
                         ..Default::default()
                     },
-                    id: iced::window::Id::unique(),
+                    id,
                 })
             }
             Message::Close(id) => task::effect(Action::Window(WindowAction::Close(id))),
@@ -200,8 +209,13 @@ impl Counter {
         );
 
         let password_input = text_input("Password", "uwu")
-            .on_input(Message::PasswordChanged)
-            .on_submit(Message::Authenticate)
+            .style(|theme, status| {
+                let mut style = iced::widget::text_input::default(theme, status);
+                style.border.radius = iced::border::radius(8.0);
+                style
+            })
+            .on_input(Message::PasswordSubmit)
+            .on_submit(Message::Authenticate(id))
             .padding(10);
 
         column![
@@ -227,15 +241,16 @@ impl Counter {
             row![
                 button(column![text("Cancel")].width(Fill).align_x(Center))
                     .on_press(Message::NewWindow)
-                    .padding(10),
+                    .padding(13),
                 button(column![text("Authenticate")].width(Fill).align_x(Center))
-                    .on_press(Message::Authenticate)
-                    .padding(10)
+                    .on_press(Message::Authenticate(id))
+                    .padding(13)
             ]
             .spacing(2)
             .width(Fill)
             .align_y(Bottom),
         ]
+        .padding(1)
         .height(Fill)
         .into()
     }
@@ -249,28 +264,3 @@ use polkit_agent_rs::gio;
 use polkit_agent_rs::polkit::UnixSession;
 
 const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
-
-pub fn pain() -> Result<(), iced_layershell::Error> {
-    let main_loop = glib::MainLoop::new(None, true);
-
-    let (sender, mut receiver) = mpsc::channel::<Message>(10);
-    let my_polkit = MyPolkit::new(Arc::new(Mutex::new(sender)));
-
-    let Ok(subject) =
-        UnixSession::new_for_process_sync(nix::unistd::getpid().as_raw(), gio::Cancellable::NONE)
-    else {
-        return Ok(());
-    };
-    let Ok(_handle) = my_polkit.register(
-        RegisterFlags::NONE,
-        &subject,
-        OBJECT_PATH,
-        gio::Cancellable::NONE,
-    ) else {
-        return Ok(());
-    };
-
-    // iced::subscription()
-    main_loop.run();
-    Ok(())
-}

@@ -211,7 +211,6 @@ impl ListenerImpl for MyPolkit {
 
 impl Default for MyPolkit {
     fn default() -> Self {
-        println!("FUCKED ME");
         Self {
             sender: Arc::new(Mutex::new(None)),
         }
