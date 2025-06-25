@@ -4,7 +4,9 @@ polkit auth agent for wayland made with iced_layershell and
 polkit_agent_rs mostly polkit-min example from decodetalks fork
 // TODO: Add links
 
-// ADD SS HERE
+![screenshot](https://github.com/user-attachments/assets/ea527ea8-d499-468c-9e0a-9bfd45929c72)
+
+
 
 
 TODO:
