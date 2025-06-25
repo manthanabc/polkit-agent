@@ -12,7 +12,6 @@ use polkit_agent_rs::polkit;
 use polkit_agent_rs::polkit::UnixUser;
 use polkit_agent_rs::subclass::ListenerImpl;
 use rpassword::prompt_password;
-use std::cell::RefCell;
 use std::sync::Mutex;
 
 fn choose_user(users: &[UnixUser]) -> Option<(String, usize)> {
@@ -32,8 +31,7 @@ fn choose_user(users: &[UnixUser]) -> Option<(String, usize)> {
 
 pub struct MyPolkit {
     pub sender: Arc<Mutex<Option<Sender<Message>>>>,
-    // Add other polkit-related fields you need
-} // MyPolkit implementation needs these adjustments:
+}
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
@@ -185,6 +183,7 @@ impl ListenerImpl for MyPolkit {
                         .iter()
                         .map(|user| user.name().unwrap().to_string())
                         .collect(),
+                    task,
                 ));
             } else {
                 println!("NO SENDER INSIDE??");

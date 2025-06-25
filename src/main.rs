@@ -7,7 +7,6 @@ use iced_layershell::build_pattern::{MainSettings, daemon};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings};
 use iced_layershell::settings::{LayerShellSettings, StartMode};
 use iced_layershell::to_layer_message;
-use polkit_agent_rs::polkit;
 use polkit_agent_rs::polkit::UnixUser;
 use std::collections::BTreeMap;
 
@@ -19,9 +18,41 @@ use std::sync::Mutex;
 mod mypolkit;
 use mypolkit::MyPolkit;
 
+use polkit_agent_rs::RegisterFlags;
 use polkit_agent_rs::Session as AgentSession;
+use polkit_agent_rs::gio;
+use polkit_agent_rs::polkit::UnixSession;
 
-use futures::channel::mpsc;
+const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
+
+fn start_session(session: &AgentSession, password: String, task: gio::Task<String>) {
+    let sub_loop = glib::MainLoop::new(None, true);
+
+    let sub_loop_2 = sub_loop.clone();
+
+    session.connect_completed(move |session, success| {
+        unsafe {
+            task.clone().return_result(Ok("success".to_string()));
+        }
+        session.cancel();
+        sub_loop_2.quit();
+    });
+    session.connect_show_info(|_session, info| {
+        println!("info: {info}");
+    });
+    session.connect_show_error(|_session, error| {
+        eprintln!("error: {error}");
+    });
+    session.connect_request(move |session, request, _echo_on| {
+        println!("{}", request);
+        if !request.starts_with("Password:") {
+            return;
+        }
+        session.response(&password);
+    });
+    session.initiate();
+    sub_loop.run();
+}
 
 pub fn main() -> Result<(), iced_layershell::Error> {
     daemon(
@@ -44,37 +75,42 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .run_with(|| Counter::new("Hello"))
 }
 
+#[derive(Debug, Clone)]
 struct AuthSession {
-    user: Vec<String>,
-    pass: String,
-    sess: AgentSession,
+    users: Vec<String>,
+    selected_user: String,
+    cookie: String,
+    password: String,
+    error: Option<String>,
+    task: gio::Task<String>,
 }
 
 #[derive(Debug, Default)]
 struct Counter {
     value: i32,
     text: String,
-    session: BTreeMap<iced::window::Id, AgentSession>,
+    sessions: BTreeMap<iced::window::Id, AuthSession>,
 }
 
-// use mypolkit::imp::Session;
-use std::cell::RefCell;
 #[to_layer_message(multi)]
 #[derive(Debug, Clone)]
 enum Message {
     WindowClosed(iced::window::Id),
-    UserSelected(String),
-    PasswordSubmit(String),
-    Authenticate(iced::window::Id),
-    Cancel,
-    NewWindow,
-    NewSession(String, Vec<String>),
+    UserSelected(Id, String),
+    PasswordSubmit(Id, String),
+    Authenticate(Id),
+    Cancel(Id),
+    NewSession(String, Vec<String>, gio::Task<String>),
     Close(Id),
+    AuthenticationSuccess(Id),
+    AuthenticationFailed(Id, String),
     IcedEvent(Event),
 }
 
 impl Counter {
-    fn remove_id(&mut self, _id: iced::window::Id) {}
+    fn remove_id(&mut self, id: iced::window::Id) {
+        self.sessions.remove(&id);
+    }
 }
 
 impl Counter {
@@ -83,7 +119,7 @@ impl Counter {
             Self {
                 value: 0,
                 text: text.to_string(),
-                session: BTreeMap::new(),
+                sessions: BTreeMap::new(),
             },
             Command::none(),
         )
@@ -102,7 +138,6 @@ impl Counter {
                     std::thread::spawn(move || {
                         let main_loop = glib::MainLoop::new(None, true);
 
-                        // let (sender, mut receiver) = mpsc::channel::<Message>(10);
                         let my_polkit = MyPolkit::new(sender);
 
                         let Ok(subject) = UnixSession::new_for_process_sync(
@@ -132,59 +167,34 @@ impl Counter {
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
-        use iced::Event;
-        use iced::keyboard;
-        use iced::keyboard::key::Named;
         match message {
             Message::IcedEvent(event) => {
-                match event {
-                    Event::Keyboard(keyboard::Event::KeyPressed {
-                        key: keyboard::Key::Named(Named::Escape),
-                        ..
-                    }) => {}
-                    _ => {}
+                if let Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                    ..
+                }) = event
+                {
+                    if let Some(id) = self.sessions.keys().next().cloned() {
+                        return Command::perform(async move { id }, Message::Close);
+                    }
                 }
                 Command::none()
             }
 
-            Message::NewSession(cookie, user) => {
-                // if self.window_shown {
-                //     return Command::none();
-                // }
-
-                // self.window_shown = true;
-                //
-                //
-                //
-
-                // let users: Vec<UnixUser> = identities
-                //     .into_iter()
-                //     .flat_map(|idenifier| idenifier.dynamic_cast())
-                //     .collect();
-                // let Some((name, index)) = choose_user(&users) else {
-                //     cancellable.cancel();
-                //     return;
-                // };
-                // let session = AgentSession::new(&users[index], cookie);
-
-                // let count = Arc::new(AtomicU8::new(0));
-                // start_session(&session, name, cancellable, task, cookie.to_string(), count);
-
-                // let users: Vec<UnixUser> = identities
-                //     .into_iter()
-                //     .flat_map(|idenifier| idenifier.dynamic_cast())
-                //     .collect();
-                // let Some((name, index)) = choose_user(&users) else {
-                //     cancellable.cancel();
-                //     return;
-                // };
-                let user: UnixUser = UnixUser::new_for_name(&user[0]).unwrap();
-                let session = AgentSession::new(&user, &cookie);
-
-                // let count = Arc::new(AtomicU8::new(0));
+            Message::NewSession(cookie, users, task) => {
                 let id = iced::window::Id::unique();
-                self.session.insert(id, session);
-                // start_session(&session, name, cancellable, task, cookie.to_string(), count);
+                let selected_user = users.first().cloned().unwrap_or_else(|| "root".to_string());
+                self.sessions.insert(
+                    id,
+                    AuthSession {
+                        users: users.clone(),
+                        selected_user,
+                        cookie: cookie.clone(),
+                        password: String::new(),
+                        error: None,
+                        task,
+                    },
+                );
                 Command::done(Message::NewLayerShell {
                     settings: NewLayerShellSettings {
                         size: Some((600, 250)),
@@ -196,29 +206,74 @@ impl Counter {
                     id,
                 })
             }
-            Message::Close(id) => task::effect(Action::Window(WindowAction::Close(id))),
-            _ => unreachable!(),
+
+            Message::UserSelected(id, user) => {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.selected_user = user;
+                }
+                Command::none()
+            }
+
+            Message::PasswordSubmit(id, password) => {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.password = password;
+                }
+                Command::none()
+            }
+
+            Message::Authenticate(id) => {
+                if let Some(session) = self.sessions.get(&id) {
+                    let user: UnixUser = UnixUser::new_for_name(&session.selected_user).unwrap();
+                    let ass = AgentSession::new(&user, &session.cookie);
+                    println!("{:?}", session.cookie);
+                    start_session(&ass, session.password.clone(), session.task.clone());
+                } else {
+                    return Command::none();
+                }
+                task::effect(Action::Window(WindowAction::Close(id)))
+            }
+
+            Message::AuthenticationSuccess(id) => {
+                task::effect(Action::Window(WindowAction::Close(id)))
+            }
+
+            Message::AuthenticationFailed(id, error) => {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.error = Some(error);
+                }
+                Command::none()
+            }
+
+            Message::Cancel(id) | Message::Close(id) => {
+                task::effect(Action::Window(WindowAction::Close(id)))
+            }
+
+            _ => Command::none(),
         }
     }
 
     fn view(&self, id: iced::window::Id) -> Element<Message> {
+        let Some(session) = self.sessions.get(&id) else {
+            return Space::with_height(0).into();
+        };
+
         let user_picker = pick_list(
-            ["root".to_string(), "admin".to_string(), "user".to_string()],
-            Some("root".to_string()),
-            Message::UserSelected,
+            session.users.clone(),
+            Some(session.selected_user.clone()),
+            move |s| Message::UserSelected(id, s),
         );
 
-        let password_input = text_input("Password", "uwu")
+        let password_input = text_input("Password", &session.password)
             .style(|theme, status| {
                 let mut style = iced::widget::text_input::default(theme, status);
                 style.border.radius = iced::border::radius(8.0);
                 style
             })
-            .on_input(Message::PasswordSubmit)
+            .on_input(move |s| Message::PasswordSubmit(id, s))
             .on_submit(Message::Authenticate(id))
             .padding(10);
 
-        column![
+        let mut content = column![
             column![
                 text("Authentication Required to set locale")
                     .size(25)
@@ -236,11 +291,17 @@ impl Counter {
                 .padding(0),
             ]
             .spacing(20)
-            .padding(30),
-            Space::with_height(Fill),
+            .padding(30)
+        ];
+        if let Some(error) = &session.error {
+            // content = content
+            //     .push(text(error).style(|theme| iced::theme::Text::Color(theme.palette().danger)));
+        }
+
+        content = content.push(Space::with_height(Fill)).push(
             row![
                 button(column![text("Cancel")].width(Fill).align_x(Center))
-                    .on_press(Message::NewWindow)
+                    .on_press(Message::Cancel(id))
                     .padding(13),
                 button(column![text("Authenticate")].width(Fill).align_x(Center))
                     .on_press(Message::Authenticate(id))
@@ -249,18 +310,8 @@ impl Counter {
             .spacing(2)
             .width(Fill)
             .align_y(Bottom),
-        ]
-        .padding(1)
-        .height(Fill)
-        .into()
+        );
+
+        content.padding(1).height(Fill).into()
     }
-
-    //         button("newwindowLeft").on_press(Message::NewWindowLeft),
-    //         button("newwindowRight").on_press(Message::NewWindowRight),
 }
-
-use polkit_agent_rs::RegisterFlags;
-use polkit_agent_rs::gio;
-use polkit_agent_rs::polkit::UnixSession;
-
-const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
