@@ -162,19 +162,12 @@ impl ListenerImpl for MyPolkit {
         cancellable: gio::Cancellable,
         task: gio::Task<Self::Message>,
     ) {
-        // if let Ok(sender) = self.sender.lock() {
-        //     println!("GOTCA");
-        //     let _ = sender.borrow_mut().try_send(Message::NewWindow);
-        // } else {
-        //     println!("NOPE");
-        //     eprintln!("No sender available");
-        // }
+        println!("icon name {:?} {:?}", _message, _icon_name);
         let users: Vec<UnixUser> = identities
             .into_iter()
             .flat_map(|idenifier| idenifier.dynamic_cast())
             .collect();
-        // let sess = Session::new(identities, cancellable, cookie.to_string());
-        println!("GOTCA");
+
         if let Ok(mut guard) = self.sender.lock() {
             if let Some(sender) = guard.as_mut() {
                 let _ = sender.try_send(Message::NewSession(
@@ -184,13 +177,14 @@ impl ListenerImpl for MyPolkit {
                         .map(|user| user.name().unwrap().to_string())
                         .collect(),
                     task,
+                    _message.to_string(),
+                    _icon_name.to_string(),
                 ));
             } else {
-                println!("NO SENDER INSIDE??");
+                println!("Mypolkit not initialized correctly");
             }
         } else {
-            println!("NOPE");
-            eprintln!("No sender available");
+            eprintln!("Failed to aquire lock");
         }
     }
 

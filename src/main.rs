@@ -25,6 +25,10 @@ use polkit_agent_rs::polkit::UnixSession;
 
 const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
 
+use std::sync::LazyLock;
+static TEXT_INPUT_ID: LazyLock<text_input::Id> =
+    LazyLock::new(|| text_input::Id::new("name_input"));
+
 fn start_session(session: &AgentSession, password: String, task: gio::Task<String>) {
     let sub_loop = glib::MainLoop::new(None, true);
 
@@ -83,6 +87,8 @@ struct AuthSession {
     password: String,
     error: Option<String>,
     task: gio::Task<String>,
+    message: String,
+    icon: String,
 }
 
 #[derive(Debug, Default)]
@@ -100,7 +106,7 @@ enum Message {
     PasswordSubmit(Id, String),
     Authenticate(Id),
     Cancel(Id),
-    NewSession(String, Vec<String>, gio::Task<String>),
+    NewSession(String, Vec<String>, gio::Task<String>, String, String),
     Close(Id),
     AuthenticationSuccess(Id),
     AuthenticationFailed(Id, String),
@@ -181,7 +187,7 @@ impl Counter {
                 Command::none()
             }
 
-            Message::NewSession(cookie, users, task) => {
+            Message::NewSession(cookie, users, task, messg, icon) => {
                 let id = iced::window::Id::unique();
                 let selected_user = users.first().cloned().unwrap_or_else(|| "root".to_string());
                 self.sessions.insert(
@@ -193,18 +199,24 @@ impl Counter {
                         password: String::new(),
                         error: None,
                         task,
+                        message: messg,
+                        icon,
                     },
                 );
-                Command::done(Message::NewLayerShell {
-                    settings: NewLayerShellSettings {
-                        size: Some((600, 250)),
-                        anchor: Anchor::Right | Anchor::Top | Anchor::Left | Anchor::Bottom,
-                        layer: Layer::Top,
-                        use_last_output: false,
-                        ..Default::default()
-                    },
-                    id,
-                })
+
+                Command::batch(vec![
+                    text_input::focus(TEXT_INPUT_ID.clone()),
+                    Command::perform(async {}, move |_| Message::NewLayerShell {
+                        settings: NewLayerShellSettings {
+                            size: Some((600, 250)),
+                            anchor: Anchor::Right | Anchor::Top | Anchor::Left | Anchor::Bottom,
+                            layer: Layer::Top,
+                            use_last_output: false,
+                            ..Default::default()
+                        },
+                        id,
+                    }),
+                ])
             }
 
             Message::UserSelected(id, user) => {
@@ -264,6 +276,7 @@ impl Counter {
         );
 
         let password_input = text_input("Password", &session.password)
+            .id(TEXT_INPUT_ID.clone())
             .style(|theme, status| {
                 let mut style = iced::widget::text_input::default(theme, status);
                 style.border.radius = iced::border::radius(8.0);
@@ -275,9 +288,7 @@ impl Counter {
 
         let mut content = column![
             column![
-                text("Authentication Required to set locale")
-                    .size(25)
-                    .width(Fill),
+                text(&session.message).size(20),
                 column![
                     row![
                         text("Authenticating as:").size(16),
