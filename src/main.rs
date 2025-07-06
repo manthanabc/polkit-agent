@@ -4,37 +4,32 @@ use iced_runtime::window::Action as WindowAction;
 use iced_runtime::{Action, task};
 
 use iced_layershell::build_pattern::{MainSettings, daemon};
-use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings};
+use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings};
 use iced_layershell::settings::{LayerShellSettings, StartMode};
 use iced_layershell::to_layer_message;
 use polkit_agent_rs::polkit::UnixUser;
 use std::collections::BTreeMap;
 
 use iced::widget::{Space, button, column, pick_list, row, text, text_input};
-use iced::{Bottom, Center, Fill, Theme};
+use iced::{Bottom, Center, Fill};
+use polkit_agent_rs::RegisterFlags;
+use polkit_agent_rs::Session as AgentSession;
+use polkit_agent_rs::gio;
+use polkit_agent_rs::polkit::UnixSession;
 use polkit_agent_rs::traits::ListenerExt;
 use std::sync::Arc;
 use std::sync::Mutex;
 mod mypolkit;
 use mypolkit::MyPolkit;
 
-use polkit_agent_rs::RegisterFlags;
-use polkit_agent_rs::Session as AgentSession;
-use polkit_agent_rs::gio;
-use polkit_agent_rs::polkit::UnixSession;
-
 const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
-
-use std::sync::LazyLock;
-static TEXT_INPUT_ID: LazyLock<text_input::Id> =
-    LazyLock::new(|| text_input::Id::new("name_input"));
 
 fn start_session(session: &AgentSession, password: String, task: gio::Task<String>) {
     let sub_loop = glib::MainLoop::new(None, true);
 
     let sub_loop_2 = sub_loop.clone();
 
-    session.connect_completed(move |session, success| {
+    session.connect_completed(move |session, _success| {
         unsafe {
             task.clone().return_result(Ok("success".to_string()));
         }
@@ -60,12 +55,12 @@ fn start_session(session: &AgentSession, password: String, task: gio::Task<Strin
 
 pub fn main() -> Result<(), iced_layershell::Error> {
     daemon(
-        Counter::namespace,
-        Counter::update,
-        Counter::view,
-        Counter::remove_id,
+        PolkitApp::namespace,
+        PolkitApp::update,
+        PolkitApp::view,
+        PolkitApp::remove_id,
     )
-    .subscription(Counter::subscription)
+    .subscription(PolkitApp::subscription)
     .settings(MainSettings {
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
@@ -76,7 +71,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         },
         ..Default::default()
     })
-    .run_with(|| Counter::new("Hello"))
+    .run_with(PolkitApp::new)
 }
 
 #[derive(Debug, Clone)]
@@ -88,19 +83,16 @@ struct AuthSession {
     error: Option<String>,
     task: gio::Task<String>,
     message: String,
-    icon: String,
 }
 
 #[derive(Debug, Default)]
-struct Counter {
-    value: i32,
-    text: String,
+struct PolkitApp {
     sessions: BTreeMap<iced::window::Id, AuthSession>,
 }
 
 #[to_layer_message(multi)]
 #[derive(Debug, Clone)]
-enum Message {
+pub enum Message {
     WindowClosed(iced::window::Id),
     UserSelected(Id, String),
     PasswordSubmit(Id, String),
@@ -113,18 +105,16 @@ enum Message {
     IcedEvent(Event),
 }
 
-impl Counter {
+impl PolkitApp {
     fn remove_id(&mut self, id: iced::window::Id) {
         self.sessions.remove(&id);
     }
 }
 
-impl Counter {
-    fn new(text: &str) -> (Self, Command<Message>) {
+impl PolkitApp {
+    fn new() -> (Self, Command<Message>) {
         (
             Self {
-                value: 0,
-                text: text.to_string(),
                 sessions: BTreeMap::new(),
             },
             Command::none(),
@@ -132,7 +122,7 @@ impl Counter {
     }
 
     fn namespace(&self) -> String {
-        String::from("Counter - Iced")
+        String::from("PolkitApp - Iced")
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -187,7 +177,7 @@ impl Counter {
                 Command::none()
             }
 
-            Message::NewSession(cookie, users, task, messg, icon) => {
+            Message::NewSession(cookie, users, task, messg, _icon) => {
                 let id = iced::window::Id::unique();
                 let selected_user = users.first().cloned().unwrap_or_else(|| "root".to_string());
                 self.sessions.insert(
@@ -200,23 +190,19 @@ impl Counter {
                         error: None,
                         task,
                         message: messg,
-                        icon,
                     },
                 );
 
-                Command::batch(vec![
-                    text_input::focus(TEXT_INPUT_ID.clone()),
-                    Command::perform(async {}, move |_| Message::NewLayerShell {
-                        settings: NewLayerShellSettings {
-                            size: Some((600, 250)),
-                            anchor: Anchor::Right | Anchor::Top | Anchor::Left | Anchor::Bottom,
-                            layer: Layer::Top,
-                            use_last_output: false,
-                            ..Default::default()
-                        },
-                        id,
-                    }),
-                ])
+                Command::perform(async {}, move |_| Message::NewLayerShell {
+                    settings: NewLayerShellSettings {
+                        size: Some((600, 250)),
+                        anchor: Anchor::Right | Anchor::Top | Anchor::Left | Anchor::Bottom,
+                        layer: Layer::Top,
+                        use_last_output: false,
+                        ..Default::default()
+                    },
+                    id,
+                })
             }
 
             Message::UserSelected(id, user) => {
@@ -276,7 +262,6 @@ impl Counter {
         );
 
         let password_input = text_input("Password", &session.password)
-            .id(TEXT_INPUT_ID.clone())
             .style(|theme, status| {
                 let mut style = iced::widget::text_input::default(theme, status);
                 style.border.radius = iced::border::radius(8.0);
@@ -302,9 +287,9 @@ impl Counter {
                 .padding(0),
             ]
             .spacing(20)
-            .padding(30)
+            .padding(25)
         ];
-        if let Some(error) = &session.error {
+        if let Some(_error) = &session.error {
             // content = content
             //     .push(text(error).style(|theme| iced::theme::Text::Color(theme.palette().danger)));
         }

@@ -1,12 +1,12 @@
-use crate::Message;
+pub use crate::Message;
 use futures::channel::mpsc::Sender;
 use glib::object::Cast;
 use glib::subclass::prelude::*;
+use polkit_agent_rs::Listener;
 use polkit_agent_rs::gio;
 use polkit_agent_rs::polkit;
 use polkit_agent_rs::polkit::UnixUser;
 use polkit_agent_rs::subclass::ListenerImpl;
-use polkit_agent_rs::Listener;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -66,7 +66,7 @@ impl ListenerImpl for MyPolkitImpl {
         &self,
         gio_result: Result<gio::Task<Self::Message>, glib::Error>,
     ) -> bool {
-        !gio_result.is_err()
+        gio_result.is_ok()
     }
 }
 
