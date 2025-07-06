@@ -237,7 +237,7 @@ impl Counter {
                 if let Some(session) = self.sessions.get(&id) {
                     let user: UnixUser = UnixUser::new_for_name(&session.selected_user).unwrap();
                     let ass = AgentSession::new(&user, &session.cookie);
-                    println!("{:?}", session.cookie);
+
                     start_session(&ass, session.password.clone(), session.task.clone());
                 } else {
                     return Command::none();

@@ -1,43 +1,81 @@
-use polkit_agent_rs::Listener;
-use std::sync::{Arc, Mutex};
-pub mod imp;
 use crate::Message;
 use futures::channel::mpsc::Sender;
-
+use glib::object::Cast;
 use glib::subclass::prelude::*;
+use polkit_agent_rs::gio;
+use polkit_agent_rs::polkit;
+use polkit_agent_rs::polkit::UnixUser;
+use polkit_agent_rs::subclass::ListenerImpl;
+use polkit_agent_rs::Listener;
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+pub struct MyPolkitImpl {
+    pub sender: Arc<Mutex<Option<Sender<Message>>>>,
+}
+
+#[glib::object_subclass]
+impl ObjectSubclass for MyPolkitImpl {
+    const NAME: &'static str = "MyPolkit";
+    type Type = MyPolkit;
+    type ParentType = Listener;
+}
+
+impl ObjectImpl for MyPolkitImpl {}
+
 glib::wrapper! {
-     pub struct MyPolkit(ObjectSubclass<imp::MyPolkit>)
+     pub struct MyPolkit(ObjectSubclass<MyPolkitImpl>)
          @extends Listener;
 }
 
-impl super::MyPolkit {
-    pub fn new(sender: Arc<Mutex<Sender<Message>>>) -> Self {
-        let obj: Self = glib::Object::new::<MyPolkit>();
+impl ListenerImpl for MyPolkitImpl {
+    type Message = String;
+    fn initiate_authentication(
+        &self,
+        _action_id: &str,
+        message: &str,
+        icon_name: &str,
+        _details: &polkit::Details,
+        cookie: &str,
+        identities: Vec<polkit::Identity>,
+        _cancellable: gio::Cancellable,
+        task: gio::Task<Self::Message>,
+    ) {
+        let users: Vec<UnixUser> = identities
+            .into_iter()
+            .flat_map(|idenifier| idenifier.dynamic_cast())
+            .collect();
 
-        // Set the sender field inside the impl
-        let imp = imp::MyPolkit::from_obj(&obj);
-        // // Properly set the sender using RefCell's borrow_mut
-        // if let Some(sener) = imp.sender {
-        //     *sener.borrow_mut() = Some(sender);
-        // }
-        //
-        // if let Ok(mut sender) = sender.lock() {
-        //     println!("GOTCA");
-        //     let _ = sender.try_send(Message::NewWindow);
-        // } else {
-        //     println!("NOPE");
-        //     eprintln!("No sender available");
-        // }
+        if let Ok(mut guard) = self.sender.lock() {
+            if let Some(sender) = guard.as_mut() {
+                let _ = sender.try_send(Message::NewSession(
+                    cookie.to_string(),
+                    users
+                        .iter()
+                        .map(|user| user.name().unwrap().to_string())
+                        .collect(),
+                    task,
+                    message.to_string(),
+                    icon_name.to_string(),
+                ));
+            }
+        }
+    }
 
-        let sender_clone = sender.lock().unwrap().clone(); // clone the inner Sender
-        *imp.sender.lock().unwrap() = Some(sender_clone);
-        println!("{:?}", obj);
-        obj
+    fn initiate_authentication_finish(
+        &self,
+        gio_result: Result<gio::Task<Self::Message>, glib::Error>,
+    ) -> bool {
+        !gio_result.is_err()
     }
 }
 
-impl Default for MyPolkit {
-    fn default() -> Self {
-        glib::Object::new()
+impl MyPolkit {
+    pub fn new(sender: Arc<Mutex<Sender<Message>>>) -> Self {
+        let obj: Self = glib::Object::new();
+        let imp = obj.imp();
+        let sender_clone = sender.lock().unwrap().clone();
+        *imp.sender.lock().unwrap() = Some(sender_clone);
+        obj
     }
 }

@@ -9,8 +9,7 @@ iced_layershell = "0.13.7"
 glib = "0.20.10"
 nix = { version = "0.30", features = ["process"] }
 polkit-agent-rs = "0.3.0"
-rpassword = "7.4.0"
-dialoguer = { version = "0.11.0", features = ["fuzzy-select"] }
+
 iced_runtime = "0.13.2"
 futures = "0.3.31"
 zbus = "5.5.0"
