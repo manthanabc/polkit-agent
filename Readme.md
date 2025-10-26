@@ -16,13 +16,36 @@ A Polkit authentication agent for Wayland desktops, built with `iced_layershell`
 *   [ ] Use system theme for a more integrated look and feel
 *   [ ] CSS-based styling for customization
 
-## Building from Source
+## Installation
+
+### Arch Linux (AUR)
+
+The easiest way to install on Arch Linux is via the AUR:
+
+```sh
+# Stable version
+yay -S polly
+
+# Development version
+yay -S polly-git
+```
+
+See [AUR_INSTALL.md](AUR_INSTALL.md) for detailed instructions.
+
+### Pre-built Binaries
+
+Download pre-built binaries from the [releases page](https://github.com/manthanabc/polkit-agent/releases) for:
+- x86_64 (glibc)
+- x86_64 (musl - static)
+- aarch64 (ARM64)
+
+### Building from Source
 
 To build the Wayland Polkit Agent from source, you'll need to have Rust and Cargo installed.
 
 1.  Clone the repository:
     ```sh
-    git clone https://github.com/your-username/polkit-agent.git
+    git clone https://github.com/manthanabc/polkit-agent.git
     ```
 2.  Build the project:
     ```sh
