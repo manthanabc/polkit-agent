@@ -10,6 +10,7 @@ use iced_layershell::to_layer_message;
 use polkit_agent_rs::polkit::UnixUser;
 use std::collections::BTreeMap;
 
+use futures::channel::mpsc::Sender;
 use iced::widget::{Space, button, column, pick_list, row, text, text_input};
 use iced::{Bottom, Center, Fill};
 use polkit_agent_rs::RegisterFlags;
@@ -19,7 +20,6 @@ use polkit_agent_rs::polkit::UnixSession;
 use polkit_agent_rs::traits::ListenerExt;
 use std::sync::Arc;
 use std::sync::Mutex;
-use futures::channel::mpsc::Sender;
 mod mypolkit;
 use mypolkit::MyPolkit;
 
@@ -27,12 +27,15 @@ const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
 const MAX_RETRIES: u32 = 3;
 
 fn start_session(
-    session: &AgentSession,
+    username: String,
+    cookie: String,
     password: String,
     task: gio::Task<String>,
     window_id: Id,
     sender: Arc<Mutex<Sender<Message>>>,
 ) {
+    let user: UnixUser = UnixUser::new_for_name(&username).unwrap();
+    let session = AgentSession::new(&user, &cookie);
     let sub_loop = glib::MainLoop::new(None, true);
 
     let sub_loop_2 = sub_loop.clone();
@@ -42,32 +45,36 @@ fn start_session(
         unsafe {
             if success {
                 task.clone().return_result(Ok("success".to_string()));
-                let _ = sender_clone.lock().unwrap().try_send(Message::AuthenticationSuccess(window_id));
+                let _ = sender_clone
+                    .lock()
+                    .unwrap()
+                    .try_send(Message::AuthenticationSuccess(window_id));
             } else {
                 task.clone().return_result(Err(glib::Error::new(
                     glib::FileError::Failed,
                     "Authentication failed",
                 )));
-                let _ = sender_clone.lock().unwrap().try_send(Message::AuthenticationFailed(
-                    window_id,
-                    "Authentication failed".to_string(),
-                ));
+                let _ = sender_clone
+                    .lock()
+                    .unwrap()
+                    .try_send(Message::AuthenticationFailed(
+                        window_id,
+                        "Authentication failed".to_string(),
+                    ));
             }
         }
         session.cancel();
         sub_loop_2.quit();
     });
-    
-    let sender_clone = sender.clone();
+
     session.connect_show_info(move |_session, info| {
         println!("info: {info}");
     });
-    
-    let sender_clone = sender.clone();
+
     session.connect_show_error(move |_session, error| {
         eprintln!("error: {error}");
     });
-    
+
     session.connect_request(move |session, request, _echo_on| {
         println!("{}", request);
         if !request.starts_with("Password:") {
@@ -187,7 +194,10 @@ impl PolkitApp {
                     });
 
                     async move {
-                        let _ = sender_clone.lock().unwrap().try_send(Message::SetSender(sender_clone.clone()));
+                        let _ = sender_clone
+                            .lock()
+                            .unwrap()
+                            .try_send(Message::SetSender(sender_clone.clone()));
                         futures::future::pending::<()>().await;
                     }
                 })
@@ -258,16 +268,16 @@ impl PolkitApp {
 
             Message::Authenticate(id) => {
                 if let Some(session) = self.sessions.get_mut(&id) {
-                    let user: UnixUser = UnixUser::new_for_name(&session.selected_user).unwrap();
-                    let ass = AgentSession::new(&user, &session.cookie);
+                    let username = session.selected_user.clone();
+                    let cookie = session.cookie.clone();
                     let password = session.password.clone();
                     let task = session.task.clone();
-                    
+
                     session.error = None;
-                    
+
                     if let Some(sender) = self.sender.clone() {
                         std::thread::spawn(move || {
-                            start_session(&ass, password, task, id, sender);
+                            start_session(username, cookie, password, task, id, sender);
                         });
                     }
                 }
@@ -281,11 +291,11 @@ impl PolkitApp {
             Message::AuthenticationFailed(id, error) => {
                 if let Some(session) = self.sessions.get_mut(&id) {
                     session.retry_count += 1;
-                    
+
                     if session.retry_count >= session.max_retries {
                         return task::effect(Action::Window(WindowAction::Close(id)));
                     }
-                    
+
                     let remaining = session.max_retries - session.retry_count;
                     session.error = Some(format!(
                         "{}. {} attempt{} remaining.",
@@ -351,8 +361,11 @@ impl PolkitApp {
             .padding(25)
         ];
         if let Some(error) = &session.error {
-            content = content
-                .push(text(error).size(14).style(|theme| iced::theme::Text::Color(theme.palette().danger)));
+            content = content.push(
+                text(error)
+                    .size(14)
+                    .color(iced::Color::from_rgb(0.8, 0.0, 0.0)),
+            );
         }
 
         content = content.push(Space::with_height(Fill)).push(
