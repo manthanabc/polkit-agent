@@ -10,6 +10,7 @@ use iced_layershell::to_layer_message;
 use polkit_agent_rs::polkit::UnixUser;
 use std::collections::BTreeMap;
 
+use futures::channel::mpsc::Sender;
 use iced::widget::{Space, button, column, pick_list, row, text, text_input};
 use iced::{Bottom, Center, Fill};
 use polkit_agent_rs::RegisterFlags;
@@ -24,22 +25,50 @@ use mypolkit::MyPolkit;
 
 const OBJECT_PATH: &str = "/org/waycrate/PolicyKit1/AuthenticationAgent";
 
-fn start_session(session: &AgentSession, password: String, task: gio::Task<String>) {
+fn start_session(
+    username: String,
+    cookie: String,
+    password: String,
+    task: gio::Task<String>,
+    window_id: Id,
+    sender: Arc<Mutex<Sender<Message>>>,
+) {
+    let user: UnixUser = UnixUser::new_for_name(&username).unwrap();
+    let session = AgentSession::new(&user, &cookie);
     let sub_loop = glib::MainLoop::new(None, true);
 
     let sub_loop_2 = sub_loop.clone();
+    let sender_clone = sender.clone();
 
-    session.connect_completed(move |session, _success| {
+    session.connect_completed(move |session, success| {
         unsafe {
-            task.clone().return_result(Ok("success".to_string()));
+            if success {
+                task.clone().return_result(Ok("success".to_string()));
+                let _ = sender_clone
+                    .lock()
+                    .unwrap()
+                    .try_send(Message::AuthenticationSuccess(window_id));
+            } else {
+                task.clone().return_result(Err(glib::Error::new(
+                    glib::FileError::Failed,
+                    "Authentication failed",
+                )));
+                let _ = sender_clone
+                    .lock()
+                    .unwrap()
+                    .try_send(Message::AuthenticationFailed(
+                        window_id,
+                        "Authentication failed".to_string(),
+                    ));
+            }
         }
         session.cancel();
         sub_loop_2.quit();
     });
-    session.connect_show_info(|_session, info| {
+    session.connect_show_info(move |_session, info| {
         println!("info: {info}");
     });
-    session.connect_show_error(|_session, error| {
+    session.connect_show_error(move |_session, error| {
         eprintln!("error: {error}");
     });
     session.connect_request(move |session, request, _echo_on| {
@@ -83,11 +112,14 @@ struct AuthSession {
     error: Option<String>,
     task: gio::Task<String>,
     message: String,
+    in_progress: bool,
+    result_received: bool,
 }
 
 #[derive(Debug, Default)]
 struct PolkitApp {
     sessions: BTreeMap<iced::window::Id, AuthSession>,
+    sender: Option<Arc<Mutex<Sender<Message>>>>,
 }
 
 #[to_layer_message(multi)]
@@ -103,6 +135,7 @@ pub enum Message {
     AuthenticationSuccess(Id),
     AuthenticationFailed(Id, String),
     IcedEvent(Event),
+    SetSender(Arc<Mutex<Sender<Message>>>),
 }
 
 impl PolkitApp {
@@ -116,6 +149,7 @@ impl PolkitApp {
         (
             Self {
                 sessions: BTreeMap::new(),
+                sender: None,
             },
             Command::none(),
         )
@@ -130,6 +164,7 @@ impl PolkitApp {
             iced::Subscription::run(|| {
                 iced::stream::channel(100, |sender| {
                     let sender = Arc::new(Mutex::new(sender));
+                    let sender_clone = sender.clone();
 
                     std::thread::spawn(move || {
                         let main_loop = glib::MainLoop::new(None, true);
@@ -154,7 +189,13 @@ impl PolkitApp {
                         main_loop.run();
                     });
 
-                    futures::future::ready(())
+                    async move {
+                        let _ = sender_clone
+                            .lock()
+                            .unwrap()
+                            .try_send(Message::SetSender(sender_clone.clone()));
+                        futures::future::pending::<()>().await;
+                    }
                 })
             }),
             iced::window::close_events().map(Message::WindowClosed),
@@ -180,18 +221,20 @@ impl PolkitApp {
             Message::NewSession(cookie, users, task, messg, _icon) => {
                 let id = iced::window::Id::unique();
                 let selected_user = users.first().cloned().unwrap_or_else(|| "root".to_string());
-                self.sessions.insert(
-                    id,
-                    AuthSession {
-                        users: users.clone(),
-                        selected_user,
-                        cookie: cookie.clone(),
-                        password: String::new(),
-                        error: None,
-                        task,
-                        message: messg,
-                    },
-                );
+            self.sessions.insert(
+                id,
+                AuthSession {
+                    users: users.clone(),
+                    selected_user,
+                    cookie: cookie.clone(),
+                    password: String::new(),
+                    error: None,
+                    task,
+                    message: messg,
+                    in_progress: false,
+                    result_received: false,
+                },
+            );
 
                 Command::perform(async {}, move |_| Message::NewLayerShell {
                     settings: NewLayerShellSettings {
@@ -220,15 +263,27 @@ impl PolkitApp {
             }
 
             Message::Authenticate(id) => {
-                if let Some(session) = self.sessions.get(&id) {
-                    let user: UnixUser = UnixUser::new_for_name(&session.selected_user).unwrap();
-                    let ass = AgentSession::new(&user, &session.cookie);
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    if session.in_progress || session.result_received {
+                        return Command::none();
+                    }
 
-                    start_session(&ass, session.password.clone(), session.task.clone());
-                } else {
-                    return Command::none();
+                    // Clear any previous error and mark in-progress
+                    session.error = None;
+                    session.in_progress = true;
+
+                    let username = session.selected_user.clone();
+                    let cookie = session.cookie.clone();
+                    let password = session.password.clone();
+                    let task = session.task.clone();
+
+                    if let Some(sender) = self.sender.clone() {
+                        std::thread::spawn(move || {
+                            start_session(username, cookie, password, task, id, sender);
+                        });
+                    }
                 }
-                task::effect(Action::Window(WindowAction::Close(id)))
+                Command::none()
             }
 
             Message::AuthenticationSuccess(id) => {
@@ -238,12 +293,19 @@ impl PolkitApp {
             Message::AuthenticationFailed(id, error) => {
                 if let Some(session) = self.sessions.get_mut(&id) {
                     session.error = Some(error);
+                    session.in_progress = false;
+                    session.result_received = true;
                 }
                 Command::none()
             }
 
             Message::Cancel(id) | Message::Close(id) => {
                 task::effect(Action::Window(WindowAction::Close(id)))
+            }
+
+            Message::SetSender(sender) => {
+                self.sender = Some(sender);
+                Command::none()
             }
 
             _ => Command::none(),
@@ -261,15 +323,17 @@ impl PolkitApp {
             move |s| Message::UserSelected(id, s),
         );
 
-        let password_input = text_input("Password", &session.password)
+        let mut password_input = text_input("Password", &session.password)
             .style(|theme, status| {
                 let mut style = iced::widget::text_input::default(theme, status);
                 style.border.radius = iced::border::radius(8.0);
                 style
             })
             .on_input(move |s| Message::PasswordSubmit(id, s))
-            .on_submit(Message::Authenticate(id))
             .padding(10);
+        if !session.in_progress && !session.result_received {
+            password_input = password_input.on_submit(Message::Authenticate(id));
+        }
 
         let mut content = column![
             column![
@@ -294,14 +358,28 @@ impl PolkitApp {
             //     .push(text(error).style(|theme| iced::theme::Text::Color(theme.palette().danger)));
         }
 
+        if let Some(error) = &session.error {
+            content = content.push(
+                text(format!("Authentication failed: {}", error))
+                    .size(14)
+                    .color(iced::Color::from_rgb(0.8, 0.0, 0.0)),
+            );
+        }
+
+        let mut cancel_btn = button(column![text("Cancel")].width(Fill).align_x(Center)).padding(13);
+        if !session.in_progress {
+            cancel_btn = cancel_btn.on_press(Message::Cancel(id));
+        }
+
+        let mut auth_btn = button(column![text("Authenticate")].width(Fill).align_x(Center)).padding(13);
+        if !session.in_progress && !session.result_received {
+            auth_btn = auth_btn.on_press(Message::Authenticate(id));
+        }
+
         content = content.push(Space::with_height(Fill)).push(
             row![
-                button(column![text("Cancel")].width(Fill).align_x(Center))
-                    .on_press(Message::Cancel(id))
-                    .padding(13),
-                button(column![text("Authenticate")].width(Fill).align_x(Center))
-                    .on_press(Message::Authenticate(id))
-                    .padding(13)
+                cancel_btn,
+                auth_btn,
             ]
             .spacing(2)
             .width(Fill)
