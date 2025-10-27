@@ -31,6 +31,10 @@ To build the Wayland Polkit Agent from source, you'll need to have Rust and Carg
     ```
 3.  The binary will be located in `target/release/polkit-agent`.
 
+
+## Dependancies
+Take a look at the github workflow file, to get the dependancies
+
 ## Contributing
 
 Contributions are welcome! If you have any ideas, suggestions, or bug reports, please open an issue or submit a pull request.
