@@ -9,10 +9,10 @@ A Polkit authentication agent for Wayland desktops, built with `iced_layershell`
 *   Lightweight and fast
 *   Built with Rust and the Iced toolkit
 *   Wayland native
+*   Retry mechanism (up to 3 attempts) if authentication fails
 
 ### Planned Features
 
-*   [ ] Retry if authentication fails
 *   [ ] Use system theme for a more integrated look and feel
 *   [ ] CSS-based styling for customization
 
