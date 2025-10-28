@@ -12,7 +12,7 @@ A Polkit authentication agent for Wayland desktops, built with `iced_layershell`
 
 ### Planned Features
 
-*   [ ] Retry if authentication fails
+*   [ ] Send notification if auth fails
 *   [ ] Use system theme for a more integrated look and feel
 *   [ ] CSS-based styling for customization
 
