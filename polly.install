@@ -1,0 +1,14 @@
+post_install() {
+  echo ""
+  echo "==> Polly - Wayland Polkit Authentication Agent"
+  echo "==> To enable polly, run one of the following:"
+  echo "==> "
+  echo "==>   systemctl --user enable --now polly.service"
+  echo "==> "
+  echo "==> Or add 'polly &' to your compositor's autostart configuration"
+  echo ""
+}
+
+post_upgrade() {
+  post_install
+}

@@ -1,0 +1,13 @@
+[Unit]
+Description=Polly - Wayland Polkit Authentication Agent
+Documentation=https://github.com/manthanabc/polkit-agent
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/polly
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

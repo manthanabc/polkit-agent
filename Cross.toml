@@ -1,0 +1,13 @@
+[target.x86_64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-musl:main"
+pre-build = [
+    "dpkg --add-architecture amd64",
+    "apt-get update && apt-get install -y libglib2.0-dev:amd64 libpolkit-gobject-1-dev:amd64 libpolkit-agent-1-dev:amd64"
+]
+
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
+pre-build = [
+    "dpkg --add-architecture arm64",
+    "apt-get update && apt-get install -y libglib2.0-dev:arm64 libpolkit-gobject-1-dev:arm64 libpolkit-agent-1-dev:arm64"
+]
